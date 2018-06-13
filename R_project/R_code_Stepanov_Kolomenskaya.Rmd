@@ -1,0 +1,211 @@
+---
+title: 'Trends in grammatical tense of the English language:  irregular vs regular
+  verbs '
+author: "Artyom Stepanov, Yulia Kolomenskaya"
+date: "13.06.18"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Materials  
+[Link to the data set](https://github.com/MMinderbinder/R-Course/blob/master/Project%20Data/fin_verbs.csv) (csv file)  
+[Link to the additional data set](https://github.com/MMinderbinder/R-Course/blob/master/Project%20Data/time_genre.csv) (csv file)  
+ 
+
+## Introduction  
+
+In modern English language we can seemingly more often find regular forms of the traditionally irregular verbs used in various types of speech. This phenomenon can be explained by the language natural tendency to grammaticalize (and thus adapt) irregular forms, especially frequently used ones. In our research we aimed to analyze the balance in usage of regular/irregular forms of one and the same verb.
+
+The previous research of the correlation between regular and irregular verb forms seems to be more focused on the neurolinguistic aspect of this phenomenon such as difference in acquisition and mental processing of these forms rather than on pure linguistic study of the shift from irregular to regular form for one and the same initially irregular verb.
+
+## Research hypothesis  
+
+Our research hypothesis is based on the assumption that the percentage of irregular form usage decreases over time and might also depend on the genre it is used in. 
+Thus the null hypothesis will be that there is no correlation between the choice of the form type and the factors listed above (time and text genre).
+
+## Data  
+
+The dataset used in this project was collected from the two well-known English language corpora: BNC (British National Corpus) and COCA (Corpus of Contemporary American English). The search through these corpora was based on the list of the most frequently used irregular English verbs.
+The final dataset contains information on the source, date, genre, verb type, verb form and context sentence.
+
+* Dependent variable: ‘Normalized frequency’ = Relative value; it is calculated in a separate dataset for each 'genre - year' combination
+
+* Predictor variables: ‘Date’ - numeric; year of the publication
+’Genre’ - categorical; 'SPOK' - spoken, 'ACPROSE' - academic prose, 'NONAC' - non-academic prose, 'OTHERPUB' - other publications (includes magazine publications from COCA), 'FICTION', 'NEWS'
+  
+
+* Number of observations is 49416 in total
+
+### Data collection and annotation   
+
+The main challenge in data annotation was to create a universal genre classification based on the division initially provided by the corpora. Thus ’ACADEMIC’ ‘’NEWS’ and “FICTION‘ are found in both BNC and COCA, whereas ‘SPOKEN’ is found in COCA, but not in BNC. Furthermore we united ‘MAG’ (magazine) in COCA and ‘OTHERPUB’ in BNC.
+
+Another  issue lies in the corpora date misalignment: while BNC includes texts for the period 1970s-1993, COCA contains materials for 1990-2017 time period. This time discrepancy prevents us from taking language origin (American vs British) as another predictor variable. Though we can check the dynamics for American and British versions of English separately.
+
+
+```{r dataset}
+data=read.csv("/Users/juliakolomenskaya/Downloads/fin_verbs.csv")
+data=data[-1]
+
+#We convert numeric values to categorical ones:
+copy=data
+data$Type[data$Type==1]='irregular' 
+data$Type[data$Type==0]='regular'
+```
+
+## R libraries in use
+```{r libraries}
+library(tidyverse)
+library(tidyverse)
+library(plotly)
+library(lme4)
+library(ggfortify)
+library(Rtsne)
+library(FactoMineR)
+# include R libraries here or later
+```
+
+
+## Analysis: descriptive statistics
+
+Here we show, how our data is distributed across the given time period (we provide overall results and the results for each of the corpora):
+
+```{r pressure, echo=FALSE}
+by_year=data %>% group_by(Date,Type) %>% summarise(n_observations=n())
+by_year %>% ggplot(aes(Date,n_observations,fill=Type))+geom_bar(stat='identity')+theme_bw()+ ylab("Number of observations")+ggtitle("Number of forms used per year")
+
+by_year_br=data[data$Source=='BNC',] %>% group_by(Date,Type) %>% summarise(n_observations=n())    
+by_year_br %>% ggplot(aes(Date,n_observations,fill=Type))+geom_bar(stat='identity')+theme_bw()+ ylab("Number of observations")+ggtitle("Number of forms used per year in Britain")
+
+by_year_am=data[data$Source=='COCA',] %>% group_by(Date,Type) %>% summarise(n_observations=n()) 
+by_year_am %>% ggplot(aes(Date,n_observations,fill=Type))+geom_bar(stat='identity')+theme_bw()+ ylab("Number of observations")+ggtitle("Number of forms used per year in America")
+```
+
+Let's have a look at the distribution of observations by genres:
+
+```{r pressure1, echo=FALSE}
+genres=data[data$Type=='regular',] %>% group_by(Date,Genres) %>% summarise(n_observations=n()) 
+genres %>% ggplot(aes(Genres,n_observations,fill=Genres))+geom_boxplot()+theme_bw()+ theme(axis.text.x = element_text(angle = 45, hjust = 1))+ylab("Number of observations of regular verbs")
+
+genres=data[data$Type=='irregular',] %>% group_by(Date,Genres) %>% summarise(n_observations=n()) 
+genres %>% ggplot(aes(Genres,n_observations,fill=Genres))+geom_boxplot()+theme_bw()+ theme(axis.text.x = element_text(angle = 45, hjust = 1))+ylab("Number of observations of irregular verbs")
+```
+
+```{r}
+#First, we provide statistics for the data, where date is taken into account:
+by_year_br %>% summarise(min=min(n_observations),max=max(n_observations),mean=mean(n_observations),
+                         median=median(n_observations),iqr=IQR(n_observations),sd=sd(n_observations))
+
+by_year_am %>% summarise(min=min(n_observations),max=max(n_observations),mean=mean(n_observations),
+                         median=median(n_observations),iqr=IQR(n_observations),sd=sd(n_observations))
+
+#Next, we do the same thing for genres:
+genres %>% summarise(min=min(n_observations),max=max(n_observations),mean=mean(n_observations),
+                         median=median(n_observations),iqr=IQR(n_observations),sd=sd(n_observations))
+```
+
+Let's see if there is a correlation between various periods of times of the relative value of irregular form usage. We convert our data with respect to time into a new data with relative values of irregular forms usage:
+
+```{r}
+
+by_year_df=data.frame(by_year)
+genres=data.frame(genres)
+
+time_dist=data.frame("Year"=c(),"Relative value"=c())
+for (i in 1:44){
+  time_dist[i,'Year']=unique(by_year_df[by_year$Type=='irregular','Date'])[i]
+  time_dist[i,'Relative value']=by_year[(by_year$Date==time_dist[i,"Year"]) & (by_year$Type=='irregular'),'n_observations']/(by_year[(by_year$Date==time_dist[i,"Year"]) & (by_year$Type=='irregular'),'n_observations']+by_year[(by_year$Date==time_dist[i,"Year"] & by_year$Type=='regular'),'n_observations'])
+}
+```
+
+And then we want to see if there's a correlation between time periods and percentage of irregular forms used in these periods (as our hypothesis implies hiearchy of time periods,we use Kendall's correlation):
+
+```{r}
+cor(time_dist,method='kendall')
+```
+
+Since the correlation is not equal to zero, we assume, that there is a connection between these two variables.
+Now, we want to investigate if the dependence between time and relative value can be approximated by linear regression model:
+
+```{r}
+fit=lm(time_dist$`Relative value`~time_dist$Year,data=time_dist)
+summary(fit)
+time_dist$model=predict(fit)
+```
+
+Let's visualize it:
+```{r}
+time_dist %>% ggplot(aes(Year,`Relative value`))+geom_point(aes(color=Year
+                                                                ))+geom_line(aes(Year,model))+geom_smooth(method='lm')+ylab("Normalized frequency")+theme_bw()
+```
+
+The visualisation here shows us, that the linear approximation for the two variables under consideration reveals an increase in the use of irregular forms over the given time periods.
+Now, let's try to use some advanced models. Namely, we use mixed-effect models with genre being a random effect:
+```{r}
+genre_dist=read.csv("/Users/juliakolomenskaya/Downloads/time_genre.csv") 
+genre_dist=genre_dist[-1]
+genre_dist=genre_dist[genre_dist$Genre!='UNPUB',]
+
+fit2=lmer(Rel.value~Year+(1|Genre),data=genre_dist)
+summary(fit2)
+```
+
+```{r}
+genre_dist$model=predict(fit2) #We use Genre as intercept term
+
+genre_dist %>% ggplot(aes(Year,Rel.value))+geom_point(aes(color=Genre))+geom_line(aes(Year,model))+ylab('Normalized frequency')+facet_wrap(~Genre)+theme_bw()
+```
+
+As opposed to linear model, the approximation by mixed-effect model produces the results, contradicting the linear model: as we see, there's a negative dynamics in the use of irregular forms.
+
+## Multi-factor analysis  
+
+### PCA:
+We try to produce 2 dimensions that explain as much variance as possible, using our numeric data:
+
+```{r}
+PCA=prcomp(genre_dist[,2:3], center = TRUE, scale. = TRUE)
+summary(PCA)
+autoplot(PCA,
+         shape = FALSE,
+         loadings = TRUE,
+         label = TRUE,
+         loadings.label = TRUE)+
+  theme_bw()
+```
+
+Next, we try to produce visualisation to reveal hidden cluster structures in our data:
+```{r}
+genre_dist=cbind(genre_dist, PCA$x)
+
+genre_dist %>% 
+  ggplot(aes(PC1, PC2, color = Genre))+
+  geom_point()+
+  stat_ellipse()+
+  theme_bw()
+```
+
+###FAMD:
+Finally, since our data consists of both the categorical and numeric variables, we use Factor Analysis of Mixed Data.
+```{r}
+famd=FAMD(genre_dist[,1:3])
+plot(famd,choix='quanti')
+```
+
+
+## Linguistic interpretation of the quantitative results 
+The results are controversial. The results, produced by linear model, contradict the results acquired using mixed-effect model. While liner model shows growth of the irregular verb usage over the time, the mixed-effect model on the contrary shows slow decline for each genre separately. But we can say for sure, that the correlation between time and normalized frequency does exist. 
+
+## Discussion on data distribution and quantitative methods in use   
+
+Thus our hypothesis was proven by linear model and rejected by the mixed-effect model. Such controversy may result from the corpus being not perfectly balanced, so for further research we can suggest enlarging and balancing our copus thus making it more representative. 
